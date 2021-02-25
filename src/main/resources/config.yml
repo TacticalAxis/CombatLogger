@@ -1,0 +1,14 @@
+# logging time - make sure this is in seconds
+logging-time: 10
+# bar-text - do %player% for player, %target% for player attacked
+bar-text: "&aYou &6(%player%) &aare in combat with &6%target%"
+# colours: BLUE, GREEN, PINK, PURPLE, RED, WHITE, YELLOW
+bar-colour: RED
+logging-messages: true
+logging-message-enter: "&cYou have entered combat with &6%target%"
+logging-message-leave: "&cYou left combat with &6%target%"
+command-disabled-message: "&6You cannot use that command at this time!"
+denied-commands:
+  - tell Testing
+  - about
+  - me

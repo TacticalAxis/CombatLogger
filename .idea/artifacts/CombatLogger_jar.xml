@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="CombatLogger:jar">
+    <output-path>$PROJECT_DIR$/../../../../../../TestingServer1.16.5/plugins</output-path>
+    <root id="archive" name="CombatLogger.jar">
+      <element id="module-output" name="CombatLogger" />
+    </root>
+  </artifact>
+</component>

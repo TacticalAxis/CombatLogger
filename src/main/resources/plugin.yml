@@ -1,0 +1,13 @@
+name: CombatLogger
+main: io.github.tacticalaxis.combatlogger.CombatLogger
+version: 1.0
+description: A combat logger plugin
+author: NathanD256
+prefix: CL
+api-version: 1.16
+commands:
+  combatlogger:
+    aliases: [cl]
+    description: Reload config
+    permission: combatlogger.reload
+    permission-message: "§cNo Permission!"
