@@ -8,7 +8,10 @@ logging-messages: true
 logging-message-enter: "&cYou have entered combat with &6%target%"
 logging-message-leave: "&cYou left combat with &6%target%"
 command-disabled-message: "&6You cannot use that command at this time!"
+release-on-left-zone: true
 denied-commands:
   - tell Testing
   - about
   - me
+blacklist-zones:
+  - safezone1

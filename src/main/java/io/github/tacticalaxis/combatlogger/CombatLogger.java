@@ -1,7 +1,14 @@
 package io.github.tacticalaxis.combatlogger;
 
+import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldguard.WorldGuard;
+import com.sk89q.worldguard.bukkit.WorldGuardPlugin;
+import com.sk89q.worldguard.protection.managers.RegionManager;
+import com.sk89q.worldguard.protection.regions.ProtectedRegion;
+import com.sk89q.worldguard.protection.regions.RegionContainer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarFlag;
 import org.bukkit.boss.BarStyle;
@@ -15,17 +22,21 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
-@SuppressWarnings({"ConstantConditions", "NullableProblems"})
+@SuppressWarnings({"ConstantConditions", "NullableProblems", "DuplicatedCode"})
 public class CombatLogger extends JavaPlugin implements Listener {
 
     private static CombatLogger instance;
+
+    private static WorldGuardPlugin worldGuard;
 
     private static ConcurrentHashMap<Player, BossBar> bars;
 
@@ -47,6 +58,13 @@ public class CombatLogger extends JavaPlugin implements Listener {
     @Override
     public void onEnable() {
         instance = this;
+        try {
+            getWorldGuard();
+        } catch (Exception e) {
+            Bukkit.getLogger().severe(ChatColor.RED + "Worldguard not present! Disabling plugin.");
+            Bukkit.getPluginManager().disablePlugin(this);
+        }
+
         ConfigurationManager.getInstance().setupConfiguration();
         getCommand("combatlogger").setExecutor(this);
         bars = new ConcurrentHashMap<>();
@@ -59,14 +77,13 @@ public class CombatLogger extends JavaPlugin implements Listener {
             public void run() {
                 for (Player player : timer.keySet()) {
                     if (playerCanBeReleased(player)) {
-                        if (config().getBoolean("logging-messages", true)) {
-                            String message = ChatColor.translateAlternateColorCodes('&', config().getString("logging-message-leave"));
-                            player.sendMessage(message.replace("%target%", combat.get(player).getName()));
-                        }
-                        timer.remove(player);
-                        bars.get(player).removeAll();
-                        bars.remove(player);
-                        combat.remove(player);
+                        try {
+                            if (config().getBoolean("logging-messages", true)) {
+                                String message = ChatColor.translateAlternateColorCodes('&', config().getString("logging-message-leave"));
+                                player.sendMessage(message.replace("%target%", combat.get(player).getName()));
+                            }
+                        } catch (Exception ignored) {}
+                        removePlayer(player);
                     } else {
                         try {
                             bars.get(player).setProgress(((timer.get(player) - (double) System.currentTimeMillis()) / 1000) / config().getLong("logging-time", 10));
@@ -80,6 +97,39 @@ public class CombatLogger extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         instance = null;
+    }
+
+    @EventHandler
+    public void onLeave(PlayerMoveEvent event) {
+        if (config().getBoolean("release-on-left-zone", true)) {
+            Location from = event.getFrom();
+            Location to = event.getTo();
+            if (isPVPzone(from) && !isPVPzone(to)) {
+                if (timer.containsKey(event.getPlayer())) {
+                    Player other = combat.get(event.getPlayer());
+                    removePlayer(event.getPlayer());
+                    if (config().getBoolean("logging-messages", true)) {
+                        String message = ChatColor.translateAlternateColorCodes('&', config().getString("logging-message-leave"));
+                        event.getPlayer().sendMessage(message.replace("%target%", other.getName()));
+                        other.sendMessage(message.replace("%target%", event.getPlayer().getName()));
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean isPVPzone(Location location) {
+        RegionContainer container = WorldGuard.getInstance().getPlatform().getRegionContainer();
+        RegionManager regionManager = container.get(BukkitAdapter.adapt(location.getWorld()));
+        for (String r : config().getStringList("blacklist-zones")) {
+            ProtectedRegion region = regionManager.getRegion(r);
+            if (region != null) {
+                if (region.contains(location.getBlockX(), location.getBlockY(), location.getBlockZ())) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     @Override
@@ -115,22 +165,17 @@ public class CombatLogger extends JavaPlugin implements Listener {
     @EventHandler
     public void quit(PlayerQuitEvent event) {
         if (timer.containsKey(event.getPlayer())) {
-            Player remove = combat.get(event.getPlayer());
-            combat.remove(remove);
-            timer.remove(remove);
-            bars.get(remove).removeAll();
-            bars.remove(remove);
-            if (config().getBoolean("logging-messages", true)) {
-                String message = ChatColor.translateAlternateColorCodes('&', config().getString("logging-message-leave"));
-                remove.sendMessage(message.replace("%target%", combat.get(event.getPlayer()).getName()));
-            }
-            Player mainRemove = event.getPlayer();
-            combat.remove(mainRemove);
-            timer.remove(mainRemove);
-            bars.get(mainRemove).removeAll();
-            bars.remove(mainRemove);
-            if (!playerCanBeReleased(mainRemove)) {
-                mainRemove.setHealth(0);
+            if (timer.containsKey(event.getPlayer())) {
+                Player other = combat.get(event.getPlayer());
+                removePlayer(event.getPlayer());
+                if (config().getBoolean("logging-messages", true)) {
+                    String message = ChatColor.translateAlternateColorCodes('&', config().getString("logging-message-leave"));
+                    event.getPlayer().sendMessage(message.replace("%target%", other.getName()));
+                    other.sendMessage(message.replace("%target%", event.getPlayer().getName()));
+                }
+                if (!playerCanBeReleased(event.getPlayer())) {
+                    event.getPlayer().setHealth(0);
+                }
             }
         }
     }
@@ -138,22 +183,12 @@ public class CombatLogger extends JavaPlugin implements Listener {
     @EventHandler
     public void death(PlayerDeathEvent event) {
         if (timer.containsKey(event.getEntity())) {
-            Player remove = combat.get(event.getEntity());
-            combat.remove(remove);
-            timer.remove(remove);
-            bars.get(remove).removeAll();
-            bars.remove(remove);
+            Player other = combat.get(event.getEntity());
+            removePlayer(event.getEntity());
             if (config().getBoolean("logging-messages", true)) {
                 String message = ChatColor.translateAlternateColorCodes('&', config().getString("logging-message-leave"));
-                remove.sendMessage(message.replace("%target%", combat.get(event.getEntity()).getName()));
-            }
-            Player mainRemove = event.getEntity();
-            combat.remove(mainRemove);
-            timer.remove(mainRemove);
-            bars.get(mainRemove).removeAll();
-            bars.remove(mainRemove);
-            if (!playerCanBeReleased(mainRemove)) {
-                mainRemove.setHealth(0);
+                event.getEntity().sendMessage(message.replace("%target%", other.getName()));
+                other.sendMessage(message.replace("%target%", event.getEntity().getName()));
             }
         }
     }
@@ -163,34 +198,38 @@ public class CombatLogger extends JavaPlugin implements Listener {
         if (event.getEntity() instanceof Player && event.getDamager() instanceof Player) {
             Player damager = (Player) event.getDamager();
             Player player = (Player) event.getEntity();
-            if (combat.get(damager) == null) {
-                timer.remove(player);
-                timer.remove(damager);
-                timer.put(player, System.currentTimeMillis() + (1000 * (config().getLong("logging-time", 10))));
-                timer.put(damager, System.currentTimeMillis() + (1000 * (config().getLong("logging-time", 10))));
-                BarColor colour;
-                try {
-                    colour = BarColor.valueOf(config().getString("bar-colour"));
-                } catch (Exception e) {
-                    Bukkit.getConsoleSender().sendMessage(ChatColor.RED + "Bossbar colour " + ChatColor.GOLD + (config().getString("bar-colour", "null")).toUpperCase() + ChatColor.RED + " does not exist!");
-                    colour = BarColor.RED;
-                }
-                setBar(player, damager, colour);
-                combat.put(player, damager);
+            if (isPVPzone(player.getLocation()) && isPVPzone(damager.getLocation())) {
 
-                setBar(damager, player, colour);
-                combat.put(damager, player);
 
-                if (config().getBoolean("logging-messages", true)) {
-                    String message = ChatColor.translateAlternateColorCodes('&', config().getString("logging-message-enter"));
-                    player.sendMessage(message.replace("%target%", damager.getName()));
-                    damager.sendMessage(message.replace("%target%", player.getName()));
+                if (combat.get(damager) != player || combat.get(player) != damager) {
+                        removePlayer(damager);
+                        removePlayer(player);
+                    timer.put(player, System.currentTimeMillis() + (1000 * (config().getLong("logging-time", 10))));
+                    timer.put(damager, System.currentTimeMillis() + (1000 * (config().getLong("logging-time", 10))));
+                    BarColor colour;
+                    try {
+                        colour = BarColor.valueOf(config().getString("bar-colour"));
+                    } catch (Exception e) {
+                        Bukkit.getConsoleSender().sendMessage(ChatColor.RED + "Bossbar colour " + ChatColor.GOLD + (config().getString("bar-colour", "null")).toUpperCase() + ChatColor.RED + " does not exist!");
+                        colour = BarColor.RED;
+                    }
+                    setBar(player, damager, colour);
+                    combat.put(player, damager);
+
+                    setBar(damager, player, colour);
+                    combat.put(damager, player);
+
+                    if (config().getBoolean("logging-messages", true)) {
+                        String message = ChatColor.translateAlternateColorCodes('&', config().getString("logging-message-enter"));
+                        player.sendMessage(message.replace("%target%", damager.getName()));
+                        damager.sendMessage(message.replace("%target%", player.getName()));
+                    }
+                } else {
+                    timer.remove(player);
+                    timer.remove(damager);
+                    timer.put(player, System.currentTimeMillis() + (1000 * (config().getLong("logging-time", 10))));
+                    timer.put(damager, System.currentTimeMillis() + (1000 * (config().getLong("logging-time", 10))));
                 }
-            } else {
-                timer.remove(player);
-                timer.remove(damager);
-                timer.put(player, System.currentTimeMillis() + (1000 * (config().getLong("logging-time", 10))));
-                timer.put(damager, System.currentTimeMillis() + (1000 * (config().getLong("logging-time", 10))));
             }
         }
     }
@@ -200,5 +239,22 @@ public class CombatLogger extends JavaPlugin implements Listener {
         damagerBar.setProgress(1);
         damagerBar.addPlayer(damager);
         bars.put(damager, damagerBar);
+    }
+
+    public static WorldGuardPlugin getWorldGuard() {
+        Plugin plugin = instance.getServer().getPluginManager().getPlugin("WorldGuard");
+        if (!(plugin instanceof WorldGuardPlugin)) {
+            return null;
+        }
+        return (WorldGuardPlugin) plugin;
+    }
+
+    private void removePlayer(Player player) {
+        timer.remove(player);
+        if (bars.containsKey(player)) {
+            bars.get(player).removeAll();
+        }
+        bars.remove(player);
+        combat.remove(player);
     }
 }

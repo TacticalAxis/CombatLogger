@@ -5,6 +5,7 @@ description: A combat logger plugin
 author: NathanD256
 prefix: CL
 api-version: 1.16
+depend: [WorldGuard]
 commands:
   combatlogger:
     aliases: [cl]
